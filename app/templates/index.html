@@ -29,6 +29,8 @@
     </div>
 </div>
 
+<div id="creditCardReminders" style="margin-bottom: 20px;"></div>
+
 <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 20px;">
     <div>
         <div class="chart-container">
@@ -216,6 +218,42 @@ new Chart(ctx, {
     }
 });
 
+function loadCreditCardReminders() {
+    fetch('/api/accounts/credit-card-reminders')
+        .then(r => r.json())
+        .then(data => {
+            const container = document.getElementById('creditCardReminders');
+            if (data.length === 0) {
+                container.innerHTML = '';
+                return;
+            }
+            
+            container.innerHTML = data.map(r => `
+                <div style="background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%); 
+                            color: white; padding: 20px; border-radius: 12px; margin-bottom: 10px;
+                            box-shadow: 0 4px 15px rgba(238, 90, 36, 0.3);">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <h3 style="margin: 0 0 10px 0;">⚠️ 信用卡还款提醒</h3>
+                            <p style="margin: 5px 0;">${r.account_name} - 账单日 ${r.days_left} 天后</p>
+                        </div>
+                        <div style="text-align: right;">
+                            <div style="font-size: 24px; font-weight: bold;">${formatMoney(r.stmt_balance)}</div>
+                            <div style="font-size: 12px; opacity: 0.9;">还款日: ${r.due_date}</div>
+                        </div>
+                    </div>
+                    <div style="margin-top: 15px; display: flex; gap: 10px;">
+                        <span class="btn" style="background: rgba(255,255,255,0.2); color: white; border: none; cursor: pointer;"
+                              onclick="window.location.href='/transactions?account_id=${r.account_id}'">
+                            查看详情
+                        </span>
+                    </div>
+                </div>
+            `).join('');
+        });
+}
+
 loadCategories('expense');
+loadCreditCardReminders();
 </script>
 {% endblock %}

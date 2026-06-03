@@ -124,6 +124,40 @@ def delete_account(id):
     db.session.commit()
     return jsonify({'success': True})
 
+@main_bp.route('/api/accounts/credit-card-reminders')
+def credit_card_reminders():
+    today = date.today()
+    accounts = Account.query.filter(
+        Account.type.in_(['信用卡', 'credit']),
+        Account.is_archived == False,
+        Account.payment_day != None
+    ).all()
+    
+    reminders = []
+    for acc in accounts:
+        due_date = date(today.year, today.month, acc.payment_day)
+        if due_date < today:
+            next_month = today.month % 12 + 1
+            next_year = today.year + (1 if today.month == 12 else 0)
+            due_date = date(next_year, next_month, acc.payment_day)
+        
+        days_left = (due_date - today).days
+        
+        if days_left <= 3:
+            stmt_balance = abs(acc.balance) if acc.balance < 0 else acc.balance
+            min_payment = stmt_balance
+            
+            reminders.append({
+                'account_id': acc.id,
+                'account_name': acc.name,
+                'due_date': due_date.strftime('%Y-%m-%d'),
+                'days_left': days_left,
+                'stmt_balance': stmt_balance,
+                'min_payment': min_payment
+            })
+    
+    return jsonify(reminders)
+
 @main_bp.route('/api/transfer', methods=['POST'])
 def transfer():
     data = request.json
@@ -465,6 +499,101 @@ def create_budget_template():
     db.session.commit()
     return jsonify({'success': True})
 
+@main_bp.route('/api/budgets/suggestions')
+def budget_suggestions():
+    today = date.today()
+    
+    months = []
+    for i in range(3):
+        d = today - timedelta(days=30 * (i + 1))
+        months.append(d.strftime('%Y-%m'))
+    
+    categories = Category.query.filter_by(type='expense').all()
+    suggestions = []
+    
+    for cat in categories:
+        total = 0
+        count = 0
+        
+        for month in months:
+            spent = db.session.query(func.sum(Transaction.amount)).filter(
+                Transaction.type == 'expense',
+                Transaction.category_id == cat.id,
+                func.strftime('%Y-%m', Transaction.date) == month
+            ).scalar() or 0
+            
+            if spent > 0:
+                total += spent
+                count += 1
+        
+        avg = total / count if count > 0 else 0
+        suggested = round(avg * 1.1, 2) if avg > 0 else 500
+        
+        if count == 0:
+            category_defaults = {
+                '餐饮': 1500,
+                '交通': 500,
+                '购物': 1000,
+                '娱乐': 500,
+                '居住': 3000,
+                '医疗': 300,
+                '教育': 500,
+                '通讯': 200,
+                '其他支出': 500
+            }
+            suggested = category_defaults.get(cat.name, 500)
+        
+        suggestions.append({
+            'category_id': cat.id,
+            'category_name': cat.name,
+            'avg_3months': round(avg, 2),
+            'suggested': suggested,
+            'data_points': count
+        })
+    
+    return jsonify(suggestions)
+
+@main_bp.route('/api/budgets/annual-overview')
+def budget_annual_overview():
+    year = request.args.get('year', date.today().year, type=int)
+    
+    categories = Category.query.filter_by(type='expense').all()
+    result = []
+    
+    for cat in categories:
+        month_data = []
+        for m in range(1, 13):
+            month_str = f'{year}-{m:02d}'
+            
+            budget = Budget.query.filter_by(
+                category_id=cat.id,
+                month=month_str
+            ).first()
+            budget_amount = budget.amount if budget else 0
+            
+            spent = db.session.query(func.sum(Transaction.amount)).filter(
+                Transaction.type == 'expense',
+                Transaction.category_id == cat.id,
+                func.strftime('%Y-%m', Transaction.date) == month_str
+            ).scalar() or 0
+            
+            execution_rate = (spent / budget_amount * 100) if budget_amount > 0 else 0
+            
+            month_data.append({
+                'month': m,
+                'budget': budget_amount,
+                'spent': spent,
+                'execution_rate': execution_rate
+            })
+        
+        result.append({
+            'category_id': cat.id,
+            'category_name': cat.name,
+            'months': month_data
+        })
+    
+    return jsonify({'year': year, 'data': result})
+
 @main_bp.route('/investments')
 def investments():
     accounts = Account.query.filter(
@@ -530,6 +659,108 @@ def delete_investment(id):
     db.session.delete(inv)
     db.session.commit()
     return jsonify({'success': True})
+
+@main_bp.route('/api/investments/profit-trend')
+def investment_profit_trend():
+    months = db.session.query(
+        func.strftime('%Y-%m', Transaction.date).label('month'),
+    ).join(Dividend, Transaction.account_id == Dividend.investment_id, isouter=True).filter(
+        or_(Transaction.type == 'income', Dividend.id != None)
+    ).group_by(func.strftime('%Y-%m', Transaction.date)).order_by(
+        func.strftime('%Y-%m', Transaction.date).desc()
+    ).limit(12).all()
+    
+    result = []
+    for month, in reversed(months):
+        month_start = datetime.strptime(month + '-01', '%Y-%m-%d').date()
+        if month_start.month == 12:
+            next_month = date(month_start.year + 1, 1, 1)
+        else:
+            next_month = date(month_start.year, month_start.month + 1, 1)
+        
+        investments = Investment.query.all()
+        total_profit = 0
+        
+        for inv in investments:
+            if inv.buy_date < next_month:
+                current_price = inv.current_price or inv.buy_price
+                profit = (current_price - inv.buy_price) * inv.quantity
+                total_profit += profit
+        
+        dividends = Dividend.query.filter(
+            func.strftime('%Y-%m', Dividend.date) == month
+        ).all()
+        for div in dividends:
+            total_profit += div.amount
+        
+        result.append({'month': month, 'profit': round(total_profit, 2)})
+    
+    if not result:
+        today = date.today()
+        for i in range(5, -1, -1):
+            m = today - timedelta(days=30 * i)
+            result.append({'month': m.strftime('%Y-%m'), 'profit': 0})
+    
+    return jsonify(result)
+
+@main_bp.route('/api/investments/asset-allocation')
+def asset_allocation():
+    investments = Investment.query.all()
+    accounts = Account.query.filter_by(is_archived=False).all()
+    
+    cash_total = sum(a.balance for a in accounts if a.type not in ['投资账户', 'investment'])
+    
+    type_values = {'股票': 0, '基金': 0, '定期': 0, '债券': 0, '其他': 0}
+    
+    for inv in investments:
+        current_price = inv.current_price or inv.buy_price
+        value = current_price * inv.quantity
+        inv_type = inv.type or '其他'
+        if inv_type in type_values:
+            type_values[inv_type] += value
+        else:
+            type_values['其他'] += value
+    
+    total_assets = cash_total + sum(type_values.values())
+    
+    if total_assets == 0:
+        return jsonify({
+            'cash': 0, 'stocks': 0, 'funds': 0, 'fixed': 0, 
+            'bonds': 0, 'other': 0, 'total': 0, 'suggestions': ['暂无资产，开始投资吧！']
+        })
+    
+    suggestions = []
+    cash_ratio = cash_total / total_assets * 100
+    stock_ratio = type_values['股票'] / total_assets * 100
+    fund_ratio = type_values['基金'] / total_assets * 100
+    
+    if cash_ratio > 50:
+        suggestions.append('现金占比过高(%.1f%%)，建议适当投资' % cash_ratio)
+    elif cash_ratio < 10:
+        suggestions.append('现金占比过低(%.1f%%)，建议保留应急资金' % cash_ratio)
+    
+    if stock_ratio > 60:
+        suggestions.append('股票占比过高(%.1f%%)，建议分散风险' % stock_ratio)
+    
+    if fund_ratio < 20 and total_assets > 10000:
+        suggestions.append('建议配置基金以分散投资风险')
+    
+    if stock_ratio + fund_ratio < 30 and total_assets > 10000:
+        suggestions.append('权益类资产占比偏低，可适当增加配置')
+    
+    return jsonify({
+        'cash': round(cash_total, 2),
+        'stocks': round(type_values['股票'], 2),
+        'funds': round(type_values['基金'], 2),
+        'fixed': round(type_values['定期'], 2),
+        'bonds': round(type_values['债券'], 2),
+        'other': round(type_values['其他'], 2),
+        'total': round(total_assets, 2),
+        'cash_ratio': round(cash_ratio, 1),
+        'stock_ratio': round(stock_ratio, 1),
+        'fund_ratio': round(fund_ratio, 1),
+        'suggestions': suggestions if suggestions else ['资产配置合理，继续保持！']
+    })
 
 @main_bp.route('/api/investments/<int:id>/dividends')
 def list_dividends(id):
@@ -809,6 +1040,95 @@ def trend_prediction():
         'amounts': amounts
     })
 
+@main_bp.route('/api/analysis/yoy-mom')
+def yoy_mom_analysis():
+    month = request.args.get('month', date.today().strftime('%Y-%m'))
+    y, m = map(int, month.split('-'))
+    
+    current = db.session.query(func.sum(Transaction.amount)).filter(
+        Transaction.type == 'expense',
+        func.strftime('%Y-%m', Transaction.date) == month
+    ).scalar() or 0
+    
+    last_month = date(y, m, 1) - timedelta(days=1)
+    mom_month = last_month.strftime('%Y-%m')
+    mom_value = db.session.query(func.sum(Transaction.amount)).filter(
+        Transaction.type == 'expense',
+        func.strftime('%Y-%m', Transaction.date) == mom_month
+    ).scalar() or 0
+    
+    yoy_year = y - 1
+    yoy_month = f'{yoy_year}-{m:02d}'
+    yoy_value = db.session.query(func.sum(Transaction.amount)).filter(
+        Transaction.type == 'expense',
+        func.strftime('%Y-%m', Transaction.date) == yoy_month
+    ).scalar() or 0
+    
+    mom_rate = ((current - mom_value) / mom_value * 100) if mom_value > 0 else 0
+    yoy_rate = ((current - yoy_value) / yoy_value * 100) if yoy_value > 0 else 0
+    
+    return jsonify({
+        'current': round(current, 2),
+        'mom': round(mom_value, 2),
+        'mom_rate': round(mom_rate, 1),
+        'yoy': round(yoy_value, 2),
+        'yoy_rate': round(yoy_rate, 1),
+        'mom_month': mom_month,
+        'yoy_month': yoy_month
+    })
+
+@main_bp.route('/api/analysis/annual-summary')
+def annual_summary():
+    year = request.args.get('year', date.today().year, type=int)
+    
+    income = db.session.query(func.sum(Transaction.amount)).filter(
+        Transaction.type == 'income',
+        func.strftime('%Y', Transaction.date) == str(year)
+    ).scalar() or 0
+    
+    expense = db.session.query(func.sum(Transaction.amount)).filter(
+        Transaction.type == 'expense',
+        func.strftime('%Y', Transaction.date) == str(year)
+    ).scalar() or 0
+    
+    net_savings = income - expense
+    
+    top_category = db.session.query(
+        Category.name,
+        func.sum(Transaction.amount).label('total')
+    ).join(Transaction).filter(
+        Transaction.type == 'expense',
+        func.strftime('%Y', Transaction.date) == str(year)
+    ).group_by(Category.id).order_by(func.sum(Transaction.amount).desc()).first()
+    
+    months_data = []
+    for m in range(1, 13):
+        month_str = f'{year}-{m:02d}'
+        m_income = db.session.query(func.sum(Transaction.amount)).filter(
+            Transaction.type == 'income',
+            func.strftime('%Y-%m', Transaction.date) == month_str
+        ).scalar() or 0
+        m_expense = db.session.query(func.sum(Transaction.amount)).filter(
+            Transaction.type == 'expense',
+            func.strftime('%Y-%m', Transaction.date) == month_str
+        ).scalar() or 0
+        months_data.append({'month': m, 'income': m_income, 'expense': m_expense, 'savings': m_income - m_expense})
+    
+    savings_ranked = sorted(months_data, key=lambda x: x['savings'], reverse=True)
+    best_month = savings_ranked[0]['month'] if savings_ranked else 0
+    
+    return jsonify({
+        'year': year,
+        'total_income': round(income, 2),
+        'total_expense': round(expense, 2),
+        'net_savings': round(net_savings, 2),
+        'savings_rate': round(net_savings / income * 100, 1) if income > 0 else 0,
+        'top_expense_category': top_category.name if top_category else '无',
+        'top_expense_amount': round(top_category.total, 2) if top_category else 0,
+        'best_savings_month': best_month,
+        'months': months_data
+    })
+
 @main_bp.route('/reports')
 def reports():
     accounts = Account.query.filter_by(is_archived=False).all()
@@ -1022,3 +1342,106 @@ def delete_recurring(id):
     db.session.delete(r)
     db.session.commit()
     return jsonify({'success': True})
+
+@main_bp.route('/api/reports/share', methods=['POST'])
+def create_report_share():
+    data = request.form
+    share_code = uuid.uuid4().hex[:16]
+    
+    expires_at = datetime.utcnow() + timedelta(days=7)
+    
+    start_date = None
+    end_date = None
+    
+    if data.get('start_date') and data.get('end_date'):
+        start_date = datetime.strptime(data['start_date'], '%Y-%m-%d').date()
+        end_date = datetime.strptime(data['end_date'], '%Y-%m-%d').date()
+    elif data.get('month'):
+        year, month = map(int, data['month'].split('-'))
+        start_date = date(year, month, 1)
+        if month == 12:
+            end_date = date(year + 1, 1, 1) - timedelta(days=1)
+        else:
+            end_date = date(year, month + 1, 1) - timedelta(days=1)
+    
+    share = ReportShare(
+        share_code=share_code,
+        report_type='custom',
+        start_date=start_date,
+        end_date=end_date,
+        include_transactions=data.get('include_transactions', 'true') == 'true',
+        include_summary=data.get('include_summary', 'true') == 'true',
+        include_budget=data.get('include_budget', 'true') == 'true',
+        expires_at=expires_at
+    )
+    db.session.add(share)
+    db.session.commit()
+    
+    return jsonify({
+        'success': True,
+        'share_code': share_code,
+        'share_url': f'/share/{share_code}'
+    })
+
+@main_bp.route('/share/<code>')
+def share_view(code):
+    share = ReportShare.query.filter_by(share_code=code).first()
+    
+    if not share:
+        return render_template('share.html', share_code=code, error='分享链接不存在')
+    
+    if share.expires_at and datetime.utcnow() > share.expires_at:
+        return render_template('share.html', share_code=code, error='分享链接已过期')
+    
+    start_date = share.start_date or date.today().replace(day=1)
+    end_date = share.end_date or date.today()
+    
+    include_transactions = share.include_transactions if hasattr(share, 'include_transactions') else True
+    
+    return render_template('share.html',
+        share_code=code,
+        start_date=start_date.strftime('%Y-%m-%d'),
+        end_date=end_date.strftime('%Y-%m-%d'),
+        expires_at=share.expires_at.strftime('%Y-%m-%d %H:%M') if share.expires_at else '无',
+        include_transactions=include_transactions,
+        error=None)
+
+@main_bp.route('/api/reports/share/<code>/data')
+def get_share_data(code):
+    share = ReportShare.query.filter_by(share_code=code).first()
+    
+    if not share or (share.expires_at and datetime.utcnow() > share.expires_at):
+        return jsonify({'error': '分享链接无效或已过期'}), 404
+    
+    start_date = share.start_date or date.today().replace(day=1)
+    end_date = share.end_date or date.today()
+    
+    transactions = Transaction.query.filter(
+        Transaction.date >= start_date,
+        Transaction.date <= end_date
+    ).order_by(Transaction.date.desc()).all()
+    
+    income = sum(t.amount for t in transactions if t.type == 'income')
+    expense = sum(t.amount for t in transactions if t.type == 'expense')
+    
+    expense_by_category = db.session.query(
+        Category.name,
+        func.sum(Transaction.amount).label('amount')
+    ).join(Transaction, Transaction.category_id == Category.id).filter(
+        Transaction.date >= start_date,
+        Transaction.date <= end_date,
+        Transaction.type == 'expense'
+    ).group_by(Category.name).all()
+    
+    return jsonify({
+        'income': income,
+        'expense': expense,
+        'by_category': [{'name': c[0], 'amount': c[1]} for c in expense_by_category],
+        'transactions': [{
+            'date': t.date.strftime('%Y-%m-%d'),
+            'category': t.category.name if t.category else '-',
+            'description': t.description,
+            'amount': t.amount,
+            'type': t.type
+        } for t in transactions[:50]] if share.include_transactions else []
+    })

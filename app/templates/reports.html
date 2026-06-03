@@ -22,6 +22,25 @@
 
 <div class="chart-container">
     <h3 style="margin-bottom: 20px;">📥 导出报表</h3>
+    <div style="margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px;">
+        <h4 style="margin-bottom: 15px;">自定义报表</h4>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 15px;">
+            <div class="form-group" style="margin-bottom: 0;">
+                <label>开始日期</label>
+                <input type="date" id="customStartDate">
+            </div>
+            <div class="form-group" style="margin-bottom: 0;">
+                <label>结束日期</label>
+                <input type="date" id="customEndDate">
+            </div>
+        </div>
+        <div style="margin-bottom: 15px;">
+            <label style="display: block; margin-bottom: 8px;">包含内容</label>
+            <label style="margin-right: 15px;"><input type="checkbox" id="includeTransactions" checked> 收支明细</label>
+            <label style="margin-right: 15px;"><input type="checkbox" id="includeSummary" checked> 分类汇总</label>
+            <label style="margin-right: 15px;"><input type="checkbox" id="includeBudget" checked> 预算执行</label>
+        </div>
+    </div>
     <div style="display: flex; gap: 20px; align-items: center; flex-wrap: wrap;">
         <div class="form-group" style="margin-bottom: 0; min-width: 150px;">
             <label>选择月份</label>
@@ -29,6 +48,15 @@
         </div>
         <button class="btn btn-primary" onclick="exportExcel()">📊 导出 Excel</button>
         <button class="btn btn-success" onclick="exportPDF()">📄 导出 PDF</button>
+        <button class="btn" onclick="generateShareLink()" style="background: #9b59b6; color: white;">🔗 生成分享链接</button>
+    </div>
+    <div id="shareLinkContainer" style="margin-top: 20px; display: none; padding: 15px; background: #e8f5e9; border-radius: 8px;">
+        <strong style="color: #27ae60;">✅ 分享链接已生成：</strong>
+        <div style="margin-top: 10px; display: flex; gap: 10px; align-items: center;">
+            <input type="text" id="shareLink" readonly style="flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+            <button class="btn btn-sm btn-primary" onclick="copyShareLink()">复制</button>
+        </div>
+        <p style="margin-top: 10px; font-size: 12px; color: #7f8c8d;">链接 7 天内有效</p>
     </div>
 </div>
 
@@ -165,14 +193,59 @@ function deleteRecurring(id) {
     }
 }
 
-function exportExcel() {
+function getExportParams() {
+    const params = new URLSearchParams();
     const month = document.getElementById('reportMonth').value;
-    window.location.href = `/api/reports/export/excel?month=${month}`;
+    const startDate = document.getElementById('customStartDate').value;
+    const endDate = document.getElementById('customEndDate').value;
+    
+    if (startDate && endDate) {
+        params.append('start_date', startDate);
+        params.append('end_date', endDate);
+    } else {
+        params.append('month', month);
+    }
+    
+    params.append('include_transactions', document.getElementById('includeTransactions').checked);
+    params.append('include_summary', document.getElementById('includeSummary').checked);
+    params.append('include_budget', document.getElementById('includeBudget').checked);
+    
+    return params;
+}
+
+function exportExcel() {
+    const params = getExportParams();
+    window.location.href = `/api/reports/export/excel?${params.toString()}`;
 }
 
 function exportPDF() {
-    const month = document.getElementById('reportMonth').value;
-    window.location.href = `/api/reports/export/pdf?month=${month}`;
+    const params = getExportParams();
+    window.location.href = `/api/reports/export/pdf?${params.toString()}`;
+}
+
+function generateShareLink() {
+    const params = getExportParams();
+    fetch('/api/reports/share', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: params
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.share_code) {
+            const shareUrl = `${window.location.origin}/share/${data.share_code}`;
+            document.getElementById('shareLink').value = shareUrl;
+            document.getElementById('shareLinkContainer').style.display = 'block';
+            showToast('分享链接已生成');
+        }
+    });
+}
+
+function copyShareLink() {
+    const link = document.getElementById('shareLink');
+    link.select();
+    document.execCommand('copy');
+    showToast('链接已复制到剪贴板');
 }
 
 document.getElementById('recurringForm').addEventListener('submit', function(e) {
@@ -194,5 +267,10 @@ document.getElementById('recurringForm').addEventListener('submit', function(e) 
 
 loadHealthScore();
 loadRecurring();
+
+const today = new Date();
+const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+document.getElementById('customStartDate').value = firstDay.toISOString().slice(0, 10);
+document.getElementById('customEndDate').value = today.toISOString().slice(0, 10);
 </script>
 {% endblock %}

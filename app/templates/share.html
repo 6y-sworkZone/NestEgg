@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+
+{% block title %}财务报表分享 - 个人理财助手{% endblock %}
+
+{% block content %}
+<div class="header">
+    <h1>📊 财务报表</h1>
+    <p style="color: #7f8c8d;">分享码: {{ share_code }}</p>
+</div>
+
+{% if error %}
+<div style="text-align: center; padding: 60px;">
+    <div style="font-size: 60px; margin-bottom: 20px;">⚠️</div>
+    <h2>{{ error }}</h2>
+    <p style="color: #7f8c8d; margin-top: 10px;">分享链接已失效或不存在</p>
+</div>
+{% else %}
+<div class="cards">
+    <div class="card income">
+        <h3>总收入</h3>
+        <div class="amount" id="totalIncome">¥0.00</div>
+    </div>
+    <div class="card expense">
+        <h3>总支出</h3>
+        <div class="amount" id="totalExpense">¥0.00</div>
+    </div>
+    <div class="card">
+        <h3>净储蓄</h3>
+        <div class="amount" id="netSavings">¥0.00</div>
+    </div>
+    <div class="card">
+        <h3>储蓄率</h3>
+        <div class="amount" id="savingsRate">0%</div>
+    </div>
+</div>
+
+<div class="chart-container">
+    <h3 style="margin-bottom: 20px;">📈 支出分类</h3>
+    <canvas id="categoryChart"></canvas>
+</div>
+
+{% if include_transactions %}
+<div class="chart-container">
+    <h3 style="margin-bottom: 20px;">📝 收支明细</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>日期</th>
+                <th>分类</th>
+                <th>描述</th>
+                <th>金额</th>
+            </tr>
+        </thead>
+        <tbody id="transactionList">
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<div class="chart-container" style="text-align: center; padding: 20px;">
+    <p style="color: #7f8c8d; font-size: 12px;">
+        报表时间范围: <strong>{{ start_date }} 至 {{ end_date }}</strong>
+        <br>
+        本分享链接有效期至 {{ expires_at }}
+    </p>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if not error %}
+<script>
+let categoryChart = null;
+
+fetch(`/api/reports/share/${share_code}/data`)
+    .then(r => r.json())
+    .then(data => {
+        document.getElementById('totalIncome').textContent = formatMoney(data.income);
+        document.getElementById('totalExpense').textContent = formatMoney(data.expense);
+        document.getElementById('netSavings').textContent = formatMoney(data.income - data.expense);
+        
+        const savingsRate = data.income > 0 ? ((data.income - data.expense) / data.income * 100).toFixed(1) : 0;
+        document.getElementById('savingsRate').textContent = savingsRate + '%';
+        
+        const ctx = document.getElementById('categoryChart').getContext('2d');
+        categoryChart = new Chart(ctx, {
+            type: 'pie',
+            data: {
+                labels: data.by_category.map(c => c.name),
+                datasets: [{
+                    data: data.by_category.map(c => c.amount),
+                    backgroundColor: ['#667eea', '#764ba2', '#f093fb', '#4facfe', '#43e97b', '#fa709a', '#fee140', '#30cfd0', '#f6d365']
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { position: 'bottom' } }
+            }
+        });
+        
+        const tbody = document.getElementById('transactionList');
+        if (tbody && data.transactions) {
+            tbody.innerHTML = data.transactions.map(t => `
+                <tr>
+                    <td>${t.date}</td>
+                    <td>${t.category}</td>
+                    <td>${t.description || '-'}</td>
+                    <td style="font-weight: bold; color: ${t.type === 'income' ? '#27ae60' : '#e74c3c'};">
+                        ${t.type === 'income' ? '+' : '-'}${formatMoney(t.amount)}
+                    </td>
+                </tr>
+            `).join('');
+            
+            if (data.transactions.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #7f8c8d;">暂无数据</td></tr>';
+            }
+        }
+    })
+    .catch(err => {
+        console.error(err);
+    });
+</script>
+{% endif %}
+{% endblock %}

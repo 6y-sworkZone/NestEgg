@@ -149,6 +149,9 @@ class ReportShare(db.Model):
     report_type = db.Column(db.String(50), nullable=False)
     start_date = db.Column(db.Date)
     end_date = db.Column(db.Date)
+    include_transactions = db.Column(db.Boolean, default=True)
+    include_summary = db.Column(db.Boolean, default=True)
+    include_budget = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     expires_at = db.Column(db.DateTime)
 

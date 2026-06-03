@@ -38,7 +38,7 @@
     </div>
 </div>
 
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
     <div class="chart-container">
         <h3 style="margin-bottom: 20px;">工作日 vs 周末</h3>
         <canvas id="weekdayChart"></canvas>
@@ -49,17 +49,32 @@
     </div>
 </div>
 
-<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px;">
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+    <div class="chart-container">
+        <h3 style="margin-bottom: 20px;">📈 同比环比分析</h3>
+        <div id="yoyMomData" style="line-height: 2;"></div>
+    </div>
     <div class="chart-container">
         <h3 style="margin-bottom: 20px;">⚠️ 消费异常检测</h3>
         <div id="anomalyList">
             <p style="color: #7f8c8d; text-align: center;">加载中...</p>
         </div>
     </div>
+</div>
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
     <div class="chart-container">
         <h3 style="margin-bottom: 20px;">📈 消费趋势预测</h3>
         <canvas id="predictionChart"></canvas>
         <div id="predictionInfo" style="margin-top: 15px; text-align: center;"></div>
+    </div>
+    <div class="chart-container">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <h3>📊 年度财务总结</h3>
+            <select id="annualYear" onchange="loadAnnualSummary()" style="padding: 8px; border-radius: 8px; border: 2px solid #ecf0f1;">
+            </select>
+        </div>
+        <div id="annualSummary" style="line-height: 2;"></div>
     </div>
 </div>
 {% endblock %}
@@ -71,6 +86,18 @@ let categoryChart = null;
 let dailyChart = null;
 let weekdayChart = null;
 let predictionChart = null;
+
+function initAnnualYearSelect() {
+    const currentYear = new Date().getFullYear();
+    const select = document.getElementById('annualYear');
+    for (let y = currentYear - 2; y <= currentYear; y++) {
+        const opt = document.createElement('option');
+        opt.value = y;
+        opt.textContent = y + '年';
+        if (y === currentYear) opt.selected = true;
+        select.appendChild(opt);
+    }
+}
 
 function loadAnalysis() {
     currentMonth = document.getElementById('monthSelect').value;
@@ -179,6 +206,30 @@ function loadAnalysis() {
             }
         });
     
+    fetch(`/api/analysis/yoy-mom?month=${currentMonth}`)
+        .then(r => r.json())
+        .then(data => {
+            const container = document.getElementById('yoyMomData');
+            container.innerHTML = `
+                <div style="padding: 10px 0; border-bottom: 1px solid #ecf0f1; display: flex; justify-content: space-between;">
+                    <span>本月支出</span>
+                    <span style="font-weight: bold;">${formatMoney(data.current)}</span>
+                </div>
+                <div style="padding: 10px 0; border-bottom: 1px solid #ecf0f1; display: flex; justify-content: space-between;">
+                    <span>环比 (${data.mom_month})</span>
+                    <span style="color: ${data.mom_rate >= 0 ? '#e74c3c' : '#27ae60'}; font-weight: bold;">
+                        ${data.mom_rate >= 0 ? '+' : ''}${data.mom_rate.toFixed(1)}%
+                    </span>
+                </div>
+                <div style="padding: 10px 0; display: flex; justify-content: space-between;">
+                    <span>同比 (${data.yoy_month})</span>
+                    <span style="color: ${data.yoy_rate >= 0 ? '#e74c3c' : '#27ae60'}; font-weight: bold;">
+                        ${data.yoy_rate >= 0 ? '+' : ''}${data.yoy_rate.toFixed(1)}%
+                    </span>
+                </div>
+            `;
+        });
+    
     fetch('/api/analysis/trend-prediction')
         .then(r => r.json())
         .then(data => {
@@ -231,6 +282,43 @@ function loadAnalysis() {
         });
 }
 
+function loadAnnualSummary() {
+    const year = document.getElementById('annualYear').value;
+    fetch(`/api/analysis/annual-summary?year=${year}`)
+        .then(r => r.json())
+        .then(data => {
+            const container = document.getElementById('annualSummary');
+            container.innerHTML = `
+                <div style="padding: 8px 0; border-bottom: 1px solid #ecf0f1; display: flex; justify-content: space-between;">
+                    <span>💰 总收入</span>
+                    <span style="color: #27ae60; font-weight: bold;">${formatMoney(data.total_income)}</span>
+                </div>
+                <div style="padding: 8px 0; border-bottom: 1px solid #ecf0f1; display: flex; justify-content: space-between;">
+                    <span>💸 总支出</span>
+                    <span style="color: #e74c3c; font-weight: bold;">${formatMoney(data.total_expense)}</span>
+                </div>
+                <div style="padding: 8px 0; border-bottom: 1px solid #ecf0f1; display: flex; justify-content: space-between;">
+                    <span>🏦 净储蓄</span>
+                    <span style="color: ${data.net_savings >= 0 ? '#27ae60' : '#e74c3c'}; font-weight: bold;">${formatMoney(data.net_savings)}</span>
+                </div>
+                <div style="padding: 8px 0; border-bottom: 1px solid #ecf0f1; display: flex; justify-content: space-between;">
+                    <span>📈 储蓄率</span>
+                    <span style="font-weight: bold;">${data.savings_rate}%</span>
+                </div>
+                <div style="padding: 8px 0; border-bottom: 1px solid #ecf0f1; display: flex; justify-content: space-between;">
+                    <span>🏆 最花钱分类</span>
+                    <span>${data.top_expense_category} (${formatMoney(data.top_expense_amount)})</span>
+                </div>
+                <div style="padding: 8px 0; display: flex; justify-content: space-between;">
+                    <span>✨ 省钱最多月份</span>
+                    <span>${data.best_savings_month}月</span>
+                </div>
+            `;
+        });
+}
+
+initAnnualYearSelect();
+loadAnnualSummary();
 loadAnalysis();
 </script>
 {% endblock %}

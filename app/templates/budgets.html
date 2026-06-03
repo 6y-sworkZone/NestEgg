@@ -7,6 +7,7 @@
     <h1>🎯 预算管理</h1>
     <div style="display: flex; gap: 10px;">
         <input type="month" id="monthSelect" value="{{ month }}" onchange="changeMonth()" style="padding: 10px; border-radius: 8px; border: 2px solid #ecf0f1;">
+        <button class="btn" onclick="openBudgetSuggestions()" style="background: #9b59b6; color: white;">💡 智能建议</button>
         <button class="btn btn-primary" onclick="openModal('addBudgetModal')">➕ 设置预算</button>
     </div>
 </div>
@@ -37,6 +38,15 @@
     <h3 style="margin-bottom: 20px;">📊 预算 vs 实际对比</h3>
     <canvas id="budgetChart" height="200"></canvas>
 </div>
+
+<div class="chart-container" style="margin-top: 20px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <h3>📅 年度预算概览</h3>
+        <select id="heatmapYear" onchange="loadAnnualHeatmap()" style="padding: 8px; border-radius: 8px; border: 2px solid #ecf0f1;">
+        </select>
+    </div>
+    <div id="annualHeatmap" style="overflow-x: auto;"></div>
+</div>
 {% endblock %}
 
 {% block modals %}
@@ -61,6 +71,18 @@
                 <button type="submit" class="btn btn-primary" style="flex: 1;">保存</button>
             </div>
         </form>
+    </div>
+</div>
+
+<div class="modal" id="budgetSuggestionsModal">
+    <div class="modal-content" style="max-width: 600px;">
+        <h2>💡 智能预算建议</h2>
+        <p style="color: #7f8c8d; margin-bottom: 15px;">基于过去3个月消费数据生成建议</p>
+        <div id="suggestionsList" style="max-height: 400px; overflow-y: auto; margin-bottom: 20px;"></div>
+        <div style="display: flex; gap: 10px;">
+            <button type="button" class="btn" onclick="closeModal('budgetSuggestionsModal')" style="flex: 1; background: #ecf0f1;">关闭</button>
+            <button type="button" class="btn btn-primary" onclick="applyAllSuggestions()" style="flex: 1;">一键应用所有</button>
+        </div>
     </div>
 </div>
 {% endblock %}
@@ -178,6 +200,112 @@ document.getElementById('addBudgetForm').addEventListener('submit', function(e) 
     });
 });
 
+let budgetSuggestions = [];
+
+function openBudgetSuggestions() {
+    fetch('/api/budgets/suggestions')
+        .then(r => r.json())
+        .then(data => {
+            budgetSuggestions = data;
+            const container = document.getElementById('suggestionsList');
+            container.innerHTML = data.map(s => `
+                <div style="display: flex; justify-content: space-between; align-items: center; 
+                            padding: 12px; margin-bottom: 8px; background: #f8f9fa; border-radius: 8px;">
+                    <div>
+                        <strong>${s.category_name}</strong>
+                        <div style="font-size: 12px; color: #7f8c8d;">
+                            3月平均: ${formatMoney(s.avg_3months)}
+                        </div>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span style="font-weight: bold; color: #667eea;">${formatMoney(s.suggested)}</span>
+                        <button class="btn btn-sm btn-primary" onclick="applySingleSuggestion(${s.category_id}, ${s.suggested})">应用</button>
+                    </div>
+                </div>
+            `).join('');
+            openModal('budgetSuggestionsModal');
+        });
+}
+
+function applySingleSuggestion(categoryId, amount) {
+    fetch('/api/budgets', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({category_id: categoryId, amount, month: currentMonth})
+    }).then(() => {
+        showToast('已应用建议');
+        loadBudgets();
+    });
+}
+
+function applyAllSuggestions() {
+    const promises = budgetSuggestions.map(s => 
+        fetch('/api/budgets', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({category_id: s.category_id, amount: s.suggested, month: currentMonth})
+        })
+    );
+    
+    Promise.all(promises).then(() => {
+        showToast('已应用所有建议');
+        closeModal('budgetSuggestionsModal');
+        loadBudgets();
+    });
+}
+
+function initHeatmapYearSelect() {
+    const currentYear = new Date().getFullYear();
+    const select = document.getElementById('heatmapYear');
+    for (let y = currentYear - 2; y <= currentYear; y++) {
+        const opt = document.createElement('option');
+        opt.value = y;
+        opt.textContent = y + '年';
+        if (y === currentYear) opt.selected = true;
+        select.appendChild(opt);
+    }
+}
+
+function loadAnnualHeatmap() {
+    const year = document.getElementById('heatmapYear').value;
+    fetch(`/api/budgets/annual-overview?year=${year}`)
+        .then(r => r.json())
+        .then(data => {
+            const container = document.getElementById('annualHeatmap');
+            let html = '<table style="font-size: 12px; min-width: 600px;"><thead><tr><th>分类</th>';
+            for (let m = 1; m <= 12; m++) {
+                html += `<th style="width: 40px; text-align: center;">${m}月</th>`;
+            }
+            html += '</tr></thead><tbody>';
+            
+            data.data.forEach(cat => {
+                html += `<tr><td style="padding: 6px; white-space: nowrap;">${cat.category_name}</td>`;
+                cat.months.forEach(m => {
+                    const rate = m.execution_rate;
+                    let bg = '#f8f9fa';
+                    let color = '#333';
+                    if (rate > 0) {
+                        if (rate >= 100) { bg = '#e74c3c'; color = 'white'; }
+                        else if (rate >= 80) { bg = '#f39c12'; color = 'white'; }
+                        else if (rate >= 50) { bg = '#f1c40f'; color = '#333'; }
+                        else if (rate >= 20) { bg = '#2ecc71'; color = 'white'; }
+                        else { bg = '#27ae60'; color = 'white'; }
+                    }
+                    html += `<td style="background: ${bg}; color: ${color}; text-align: center; padding: 4px; border-radius: 4px;" title="预算: ${m.budget.toFixed(0)}, 支出: ${m.spent.toFixed(0)}, 执行率: ${rate.toFixed(1)}%">${rate >= 100 ? '💥' : rate >= 80 ? '⚠️' : rate >= 50 ? '✓' : '•'}</td>`;
+                });
+                html += '</tr>';
+            });
+            
+            html += '</tbody></table>';
+            html += '<div style="margin-top: 15px; display: flex; gap: 15px; font-size: 12px; color: #7f8c8d;">';
+            html += '<span>💥 超支</span><span>⚠️ 接近超支</span><span>✓ 正常</span><span>• 预算充足</span>';
+            html += '</div>';
+            container.innerHTML = html;
+        });
+}
+
+initHeatmapYearSelect();
+loadAnnualHeatmap();
 loadBudgets();
 </script>
 {% endblock %}
