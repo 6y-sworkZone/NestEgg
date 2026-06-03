@@ -944,6 +944,19 @@ def daily_trend():
     
     return jsonify([{'date': d, 'amount': a} for d, a in days])
 
+@main_bp.route('/api/analysis/hot-days')
+def hot_days():
+    month = request.args.get('month', date.today().strftime('%Y-%m'))
+    days = db.session.query(
+        func.date(Transaction.date),
+        func.sum(Transaction.amount)
+    ).filter(
+        Transaction.type == 'expense',
+        func.strftime('%Y-%m', Transaction.date) == month
+    ).group_by(func.date(Transaction.date)).order_by(func.sum(Transaction.amount).desc()).limit(5).all()
+    
+    return jsonify([{'date': d, 'amount': a} for d, a in days])
+
 @main_bp.route('/api/analysis/weekday-vs-weekend')
 def weekday_vs_weekend():
     month = request.args.get('month', date.today().strftime('%Y-%m'))
@@ -1440,7 +1453,7 @@ def get_share_data(code):
         'transactions': [{
             'date': t.date.strftime('%Y-%m-%d'),
             'category': t.category.name if t.category else '-',
-            'description': t.description,
+            'description': t.note or '-',
             'amount': t.amount,
             'type': t.type
         } for t in transactions[:50]] if share.include_transactions else []

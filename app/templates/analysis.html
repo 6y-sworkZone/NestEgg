@@ -44,7 +44,7 @@
         <canvas id="weekdayChart"></canvas>
     </div>
     <div class="chart-container">
-        <h3 style="margin-bottom: 20px;">消费热点排行</h3>
+        <h3 style="margin-bottom: 20px;">🔥 消费热点日</h3>
         <div id="hotSpots"></div>
     </div>
 </div>
@@ -129,15 +129,22 @@ function loadAnalysis() {
                     plugins: { legend: { position: 'bottom' } }
                 }
             });
-            
+        });
+    
+    fetch(`/api/analysis/hot-days?month=${currentMonth}`)
+        .then(r => r.json())
+        .then(data => {
             const hotSpots = document.getElementById('hotSpots');
-            const sorted = [...data.by_category].sort((a, b) => b.amount - a.amount);
-            hotSpots.innerHTML = sorted.slice(0, 5).map((c, i) => `
-                <div style="display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #ecf0f1;">
-                    <span><strong>${i + 1}.</strong> ${c.name}</span>
-                    <span style="font-weight: bold; color: #e74c3c;">${formatMoney(c.amount)}</span>
-                </div>
-            `).join('');
+            if (data.length === 0) {
+                hotSpots.innerHTML = '<p style="color: #7f8c8d; text-align: center; padding: 20px;">暂无数据</p>';
+            } else {
+                hotSpots.innerHTML = data.map((d, i) => `
+                    <div style="display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #ecf0f1;">
+                        <span><strong>${i + 1}.</strong> ${d.date.slice(5)}</span>
+                        <span style="font-weight: bold; color: #e74c3c;">${formatMoney(d.amount)}</span>
+                    </div>
+                `).join('');
+            }
         });
     
     fetch(`/api/analysis/daily-trend?month=${currentMonth}`)
