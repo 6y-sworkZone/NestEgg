@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}个人理财助手{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <div class="sidebar">
+        <h2>💰 理财助手</h2>
+        <ul>
+            <li><a href="{{ url_for('main.index') }}" {% if request.path == '/' %}class="active"{% endif %}>📊 仪表盘</a></li>
+            <li><a href="{{ url_for('main.accounts') }}" {% if '/accounts' in request.path %}class="active"{% endif %}>💳 账户管理</a></li>
+            <li><a href="{{ url_for('main.transactions') }}" {% if '/transactions' in request.path %}class="active"{% endif %}>📝 收支记录</a></li>
+            <li><a href="{{ url_for('main.budgets') }}" {% if '/budgets' in request.path %}class="active"{% endif %}>🎯 预算管理</a></li>
+            <li><a href="{{ url_for('main.investments') }}" {% if '/investments' in request.path %}class="active"{% endif %}>📈 投资追踪</a></li>
+            <li><a href="{{ url_for('main.savings') }}" {% if '/savings' in request.path %}class="active"{% endif %}>🏦 储蓄目标</a></li>
+            <li><a href="{{ url_for('main.analysis') }}" {% if '/analysis' in request.path %}class="active"{% endif %}>📊 账单分析</a></li>
+            <li><a href="{{ url_for('main.reports') }}" {% if '/reports' in request.path %}class="active"{% endif %}>📋 报表导出</a></li>
+        </ul>
+    </div>
+    
+    <div class="main-content">
+        {% block content %}{% endblock %}
+    </div>
+    
+    {% block modals %}{% endblock %}
+    
+    <script>
+        function openModal(id) {
+            document.getElementById(id).classList.add('active');
+        }
+        
+        function closeModal(id) {
+            document.getElementById(id).classList.remove('active');
+        }
+        
+        function amount|formatMoney {
+            return '¥' + parseFloat(amount).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        }
+        
+        function showToast(message, type = 'success') {
+            const toast = document.createElement('div');
+            toast.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                padding: 15px 25px;
+                background: ${type === 'success' ? '#27ae60' : '#e74c3c'};
+                color: white;
+                border-radius: 8px;
+                z-index: 10000;
+                animation: slideIn 0.3s ease-out;
+            `;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            
+            setTimeout(() => toast.remove(), 3000);
+        }
+    </script>
+    <style>
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+    </style>
+    
+    {% block scripts %}{% endblock %}
+</body>
+</html>

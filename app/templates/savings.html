@@ -1,0 +1,218 @@
+{% extends "base.html" %}
+
+{% block title %}储蓄目标 - 个人理财助手{% endblock %}
+
+{% block content %}
+<div class="header">
+    <h1>🏦 储蓄目标</h1>
+    <button class="btn btn-primary" onclick="openModal('addGoalModal')">➕ 创建目标</button>
+</div>
+
+<h3 style="margin-bottom: 20px;">🎯 进行中</h3>
+<div class="cards" id="activeGoals">
+</div>
+
+<h3 style="margin: 30px 0 20px;">✅ 已完成</h3>
+<div class="cards" id="completedGoals">
+</div>
+
+<div class="celebration" id="celebration"></div>
+{% endblock %}
+
+{% block modals %}
+<div class="modal" id="addGoalModal">
+    <div class="modal-content">
+        <h2>➕ 创建储蓄目标</h2>
+        <form id="addGoalForm">
+            <div class="form-group">
+                <label>目标名称</label>
+                <input type="text" name="name" required placeholder="如：旅行基金">
+            </div>
+            <div class="row">
+                <div class="form-group">
+                    <label>目标金额</label>
+                    <input type="number" step="0.01" name="target_amount" required>
+                </div>
+                <div class="form-group">
+                    <label>当前已存</label>
+                    <input type="number" step="0.01" name="current_amount" value="0">
+                </div>
+            </div>
+            <div class="row">
+                <div class="form-group">
+                    <label>截止日期</label>
+                    <input type="date" name="deadline">
+                </div>
+                <div class="form-group">
+                    <label>优先级</label>
+                    <select name="priority">
+                        <option value="1">高</option>
+                        <option value="2" selected>中</option>
+                        <option value="3">低</option>
+                    </select>
+                </div>
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <button type="button" class="btn" onclick="closeModal('addGoalModal')" style="flex: 1; background: #ecf0f1;">取消</button>
+                <button type="submit" class="btn btn-primary" style="flex: 1;">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="modal" id="depositModal">
+    <div class="modal-content">
+        <h2>💰 存入资金</h2>
+        <form id="depositForm">
+            <input type="hidden" name="goal_id">
+            <div class="form-group">
+                <label>存入金额</label>
+                <input type="number" step="0.01" name="amount" required>
+            </div>
+            <div class="form-group">
+                <label>备注</label>
+                <input type="text" name="note" placeholder="可选">
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <button type="button" class="btn" onclick="closeModal('depositModal')" style="flex: 1; background: #ecf0f1;">取消</button>
+                <button type="submit" class="btn btn-primary" style="flex: 1;">存入</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function loadGoals() {
+    fetch('/api/savings')
+        .then(r => r.json())
+        .then(data => {
+            const activeContainer = document.getElementById('activeGoals');
+            const completedContainer = document.getElementById('completedGoals');
+            
+            activeContainer.innerHTML = renderGoals(data.active, false);
+            completedContainer.innerHTML = renderGoals(data.completed, true);
+        });
+}
+
+function renderGoals(goals, isCompleted) {
+    if (goals.length === 0) {
+        return '<div class="empty-state" style="grid-column: 1 / -1;"><i>🏦</i><p>暂无目标</p></div>';
+    }
+    
+    return goals.map(g => `
+        <div class="goal-card">
+            <div style="display: flex; justify-content: space-between; align-items: start;">
+                <h4>${g.name}</h4>
+                <div style="display: flex; gap: 5px;">
+                    ${!isCompleted ? `<button class="btn btn-sm btn-success" onclick="openDeposit(${g.id})">💰</button>` : ''}
+                    <button class="btn btn-sm" onclick="editGoal(${JSON.stringify(g).replace(/"/g, '&quot;')})" style="background: #f39c12; color: white;">✏️</button>
+                    <button class="btn btn-sm btn-danger" onclick="deleteGoal(${g.id})">🗑️</button>
+                </div>
+            </div>
+            <div style="margin: 15px 0;">
+                <div style="display: flex; justify-content: space-between; font-size: 14px; margin-bottom: 8px;">
+                    <span>${g.current_amount|formatMoney} / ${g.target_amount|formatMoney}</span>
+                    <span>${g.progress.toFixed(1)}%</span>
+                </div>
+                <div class="progress-bar ${g.progress >= 100 ? '' : g.progress >= 80 ? 'warning' : ''}">
+                    <div class="progress" style="width: ${Math.min(g.progress, 100)}%"></div>
+                </div>
+            </div>
+            <div class="meta">
+                <span>剩余: ${g.target_amount - g.current_amount|formatMoney}</span>
+                ${g.deadline ? `<span>截止: ${g.deadline}</span>` : ''}
+                ${g.monthly_needed > 0 ? `<span>每月需存: ${g.monthly_needed|formatMoney}</span>` : ''}
+            </div>
+            ${g.deposits.length > 0 ? `
+                <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #ecf0f1;">
+                    <div style="font-size: 12px; color: #7f8c8d; margin-bottom: 8px;">最近存入记录:</div>
+                    ${g.deposits.slice(0, 3).map(d => `<div style="font-size: 12px; display: flex; justify-content: space-between;">
+                        <span>${d.date}</span>
+                        <span style="color: #27ae60;">+${d.amount|formatMoney}</span>
+                    </div>`).join('')}
+                </div>
+            ` : ''}
+        </div>
+    `).join('');
+}
+
+function openDeposit(id) {
+    document.querySelector('#depositForm [name="goal_id"]').value = id;
+    openModal('depositModal');
+}
+
+function deleteGoal(id) {
+    if (confirm('确定删除这个目标？')) {
+        fetch(`/api/savings/${id}`, {method: 'DELETE'})
+            .then(() => {
+                showToast('删除成功');
+                loadGoals();
+            });
+    }
+}
+
+function celebrate() {
+    const container = document.getElementById('celebration');
+    const colors = ['#f39c12', '#e74c3c', '#27ae60', '#3498db', '#9b59b6', '#1abc9c'];
+    
+    for (let i = 0; i < 50; i++) {
+        const confetti = document.createElement('div');
+        confetti.className = 'confetti';
+        confetti.style.left = Math.random() * 100 + '%';
+        confetti.style.background = colors[Math.floor(Math.random() * colors.length)];
+        confetti.style.animationDelay = Math.random() * 2 + 's';
+        container.appendChild(confetti);
+    }
+    
+    setTimeout(() => container.innerHTML = '', 3000);
+}
+
+document.getElementById('addGoalForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    const formData = new FormData(this);
+    const data = Object.fromEntries(formData);
+    
+    fetch('/api/savings', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    }).then(() => {
+        showToast('目标创建成功');
+        closeModal('addGoalModal');
+        loadGoals();
+        this.reset();
+    });
+});
+
+document.getElementById('depositForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    const formData = new FormData(this);
+    const data = Object.fromEntries(formData);
+    const id = data.goal_id;
+    delete data.goal_id;
+    
+    fetch(`/api/savings/${id}/deposit`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    }).then(r => r.json()).then(res => {
+        showToast('存入成功');
+        closeModal('depositModal');
+        loadGoals();
+        this.reset();
+        
+        if (res.completed) {
+            setTimeout(celebrate, 100);
+        }
+    });
+});
+
+function editGoal(g) {
+    showToast('编辑功能开发中', 'error');
+}
+
+loadGoals();
+</script>
+{% endblock %}

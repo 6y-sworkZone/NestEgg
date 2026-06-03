@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+
+{% block title %}预算管理 - 个人理财助手{% endblock %}
+
+{% block content %}
+<div class="header">
+    <h1>🎯 预算管理</h1>
+    <div style="display: flex; gap: 10px;">
+        <input type="month" id="monthSelect" value="{{ month }}" onchange="changeMonth()" style="padding: 10px; border-radius: 8px; border: 2px solid #ecf0f1;">
+        <button class="btn btn-primary" onclick="openModal('addBudgetModal')">➕ 设置预算</button>
+    </div>
+</div>
+
+<div class="cards">
+    <div class="card">
+        <h3>总预算</h3>
+        <div class="amount" id="totalBudget">¥0.00</div>
+    </div>
+    <div class="card">
+        <h3>已支出</h3>
+        <div class="amount" id="totalSpent" style="color: #e74c3c;">¥0.00</div>
+    </div>
+    <div class="card">
+        <h3>剩余</h3>
+        <div class="amount" id="totalRemaining">¥0.00</div>
+    </div>
+    <div class="card">
+        <h3>执行率</h3>
+        <div class="amount" id="budgetRate">0%</div>
+    </div>
+</div>
+
+<div id="budgetsList">
+</div>
+{% endblock %}
+
+{% block modals %}
+<div class="modal" id="addBudgetModal">
+    <div class="modal-content">
+        <h2>➕ 设置预算</h2>
+        <form id="addBudgetForm">
+            <div class="form-group">
+                <label>分类</label>
+                <select name="category_id" required>
+                    {% for c in categories %}
+                    <option value="{{ c.id }}">{{ c.icon }} {{ c.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label>预算金额</label>
+                <input type="number" step="0.01" name="amount" required placeholder="0.00">
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <button type="button" class="btn" onclick="closeModal('addBudgetModal')" style="flex: 1; background: #ecf0f1;">取消</button>
+                <button type="submit" class="btn btn-primary" style="flex: 1;">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentMonth = '{{ month }}';
+
+function changeMonth() {
+    currentMonth = document.getElementById('monthSelect').value;
+    loadBudgets();
+}
+
+function loadBudgets() {
+    fetch(`/api/budgets?month=${currentMonth}`)
+        .then(r => r.json())
+        .then(data => {
+            const totalBudget = data.reduce((sum, b) => sum + b.amount, 0);
+            const totalSpent = data.reduce((sum, b) => sum + b.spent, 0);
+            const remaining = totalBudget - totalSpent;
+            const rate = totalBudget > 0 ? (totalSpent / totalBudget * 100).toFixed(1) : 0;
+            
+            document.getElementById('totalBudget').textContent = totalBudget|formatMoney;
+            document.getElementById('totalSpent').textContent = totalSpent|formatMoney;
+            document.getElementById('totalRemaining').textContent = remaining|formatMoney;
+            document.getElementById('totalRemaining').style.color = remaining >= 0 ? '#27ae60' : '#e74c3c';
+            document.getElementById('budgetRate').textContent = rate + '%';
+            
+            const container = document.getElementById('budgetsList');
+            container.innerHTML = data.map(b => {
+                const percentage = b.percentage;
+                let statusClass = '';
+                if (percentage >= 100) statusClass = 'danger';
+                else if (percentage >= 80) statusClass = 'warning';
+                
+                return `
+                    <div class="budget-item">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                            <h4>${b.category_name}</h4>
+                            <span style="font-weight: bold; ${percentage >= 100 ? 'color: #e74c3c' : percentage >= 80 ? 'color: #f39c12' : ''}">${b.spent|formatMoney} / ${b.amount|formatMoney}</span>
+                        </div>
+                        <div class="progress-bar ${statusClass}">
+                            <div class="progress" style="width: ${Math.min(percentage, 100)}%"></div>
+                        </div>
+                        <div style="margin-top: 8px; display: flex; justify-content: space-between; font-size: 12px; color: #7f8c8d;">
+                            <span>${percentage.toFixed(1)}% 已使用</span>
+                            <span>剩余: ${b.amount - b.spent|formatMoney}</span>
+                        </div>
+                        ${percentage >= 100 ? '<div style="margin-top: 8px; color: #e74c3c; font-size: 13px;">⚠️ 已超支！</div>' : percentage >= 80 ? '<div style="margin-top: 8px; color: #f39c12; font-size: 13px;">⚠️ 即将超支</div>' : ''}
+                    </div>
+                `;
+            }).join('');
+            
+            if (data.length === 0) {
+                container.innerHTML = '<div class="empty-state"><i>🎯</i><p>还没有设置预算，点击上方按钮开始设置</p></div>';
+            }
+        });
+}
+
+document.getElementById('addBudgetForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    const formData = new FormData(this);
+    const data = Object.fromEntries(formData);
+    data.month = currentMonth;
+    
+    fetch('/api/budgets', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    }).then(() => {
+        showToast('预算设置成功');
+        closeModal('addBudgetModal');
+        loadBudgets();
+        this.reset();
+    });
+});
+
+loadBudgets();
+</script>
+{% endblock %}

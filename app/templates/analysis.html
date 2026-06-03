@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+
+{% block title %}账单分析 - 个人理财助手{% endblock %}
+
+{% block content %}
+<div class="header">
+    <h1>📊 账单分析</h1>
+    <input type="month" id="monthSelect" value="{{ today }}" onchange="loadAnalysis()" style="padding: 10px; border-radius: 8px; border: 2px solid #ecf0f1;">
+</div>
+
+<div class="cards">
+    <div class="card income">
+        <h3>总收入</h3>
+        <div class="amount" id="totalIncome">¥0.00</div>
+    </div>
+    <div class="card expense">
+        <h3>总支出</h3>
+        <div class="amount" id="totalExpense">¥0.00</div>
+    </div>
+    <div class="card">
+        <h3>净收入</h3>
+        <div class="amount" id="netIncome">¥0.00</div>
+    </div>
+    <div class="card">
+        <h3>储蓄率</h3>
+        <div class="amount" id="savingsRate">0%</div>
+    </div>
+</div>
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+    <div class="chart-container">
+        <h3 style="margin-bottom: 20px;">支出分类占比</h3>
+        <canvas id="categoryChart"></canvas>
+    </div>
+    <div class="chart-container">
+        <h3 style="margin-bottom: 20px;">日支出趋势</h3>
+        <canvas id="dailyChart"></canvas>
+    </div>
+</div>
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+    <div class="chart-container">
+        <h3 style="margin-bottom: 20px;">工作日 vs 周末</h3>
+        <canvas id="weekdayChart"></canvas>
+    </div>
+    <div class="chart-container">
+        <h3 style="margin-bottom: 20px;">消费热点排行</h3>
+        <div id="hotSpots"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentMonth = new Date().toISOString().slice(0, 7);
+let categoryChart = null;
+let dailyChart = null;
+let weekdayChart = null;
+
+function loadAnalysis() {
+    currentMonth = document.getElementById('monthSelect').value;
+    
+    fetch(`/api/analysis/monthly-summary?month=${currentMonth}`)
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById('totalIncome').textContent = data.income|formatMoney;
+            document.getElementById('totalExpense').textContent = data.expense|formatMoney;
+            document.getElementById('netIncome').textContent = data.net|formatMoney;
+            document.getElementById('netIncome').style.color = data.net >= 0 ? '#27ae60' : '#e74c3c';
+            
+            const savingsRate = data.income > 0 ? (data.net / data.income * 100).toFixed(1) : 0;
+            document.getElementById('savingsRate').textContent = savingsRate + '%';
+            
+            const ctx1 = document.getElementById('categoryChart').getContext('2d');
+            if (categoryChart) categoryChart.destroy();
+            categoryChart = new Chart(ctx1, {
+                type: 'pie',
+                data: {
+                    labels: data.by_category.map(c => c.name),
+                    datasets: [{
+                        data: data.by_category.map(c => c.amount),
+                        backgroundColor: ['#667eea', '#764ba2', '#f093fb', '#4facfe', '#43e97b', '#fa709a', '#fee140', '#30cfd0', '#f6d365']
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { position: 'bottom' } }
+                }
+            });
+            
+            const hotSpots = document.getElementById('hotSpots');
+            const sorted = [...data.by_category].sort((a, b) => b.amount - a.amount);
+            hotSpots.innerHTML = sorted.slice(0, 5).map((c, i) => `
+                <div style="display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #ecf0f1;">
+                    <span><strong>${i + 1}.</strong> ${c.name}</span>
+                    <span style="font-weight: bold; color: #e74c3c;">${c.amount|formatMoney}</span>
+                </div>
+            `).join('');
+        });
+    
+    fetch(`/api/analysis/daily-trend?month=${currentMonth}`)
+        .then(r => r.json())
+        .then(data => {
+            const ctx2 = document.getElementById('dailyChart').getContext('2d');
+            if (dailyChart) dailyChart.destroy();
+            dailyChart = new Chart(ctx2, {
+                type: 'line',
+                data: {
+                    labels: data.map(d => d.date.slice(8)),
+                    datasets: [{
+                        label: '支出',
+                        data: data.map(d => d.amount),
+                        borderColor: '#e74c3c',
+                        backgroundColor: 'rgba(231, 76, 60, 0.1)',
+                        fill: true,
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { display: false } }
+                }
+            });
+        });
+    
+    fetch(`/api/analysis/weekday-vs-weekend?month=${currentMonth}`)
+        .then(r => r.json())
+        .then(data => {
+            const ctx3 = document.getElementById('weekdayChart').getContext('2d');
+            if (weekdayChart) weekdayChart.destroy();
+            weekdayChart = new Chart(ctx3, {
+                type: 'bar',
+                data: {
+                    labels: ['工作日', '周末'],
+                    datasets: [{
+                        label: '支出',
+                        data: [data.weekday, data.weekend],
+                        backgroundColor: ['#667eea', '#f39c12']
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { display: false } }
+                }
+            });
+        });
+}
+
+loadAnalysis();
+</script>
+{% endblock %}
