@@ -72,7 +72,7 @@
 <script>
 let categoryChart = null;
 
-fetch(`/api/reports/share/${share_code}/data`)
+fetch(`/api/reports/share/{{ share_code }}/data`)
     .then(r => r.json())
     .then(data => {
         document.getElementById('totalIncome').textContent = formatMoney(data.income);
