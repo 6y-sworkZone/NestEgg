@@ -136,6 +136,58 @@
         </form>
     </div>
 </div>
+
+<div class="modal" id="dividendModal">
+    <div class="modal-content">
+        <h2>💵 分红/利息记录</h2>
+        <p id="dividendInvName" style="color: #7f8c8d; margin-bottom: 15px;"></p>
+        <div id="dividendsList" style="margin-bottom: 20px; max-height: 200px; overflow-y: auto;"></div>
+        <hr style="border: none; border-top: 1px solid #ecf0f1; margin: 15px 0;">
+        <h4 style="margin-bottom: 10px;">添加记录</h4>
+        <form id="addDividendForm">
+            <input type="hidden" name="investment_id">
+            <div class="row">
+                <div class="form-group">
+                    <label>金额</label>
+                    <input type="number" step="0.01" name="amount" required>
+                </div>
+                <div class="form-group">
+                    <label>日期</label>
+                    <input type="date" name="date" value="{{ today }}" required>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>备注</label>
+                <input type="text" name="note" placeholder="如：Q1分红">
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <button type="button" class="btn" onclick="closeModal('dividendModal')" style="flex: 1; background: #ecf0f1;">关闭</button>
+                <button type="submit" class="btn btn-success" style="flex: 1;">添加</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="modal" id="notesModal">
+    <div class="modal-content">
+        <h2>📝 投资笔记</h2>
+        <p id="notesInvName" style="color: #7f8c8d; margin-bottom: 15px;"></p>
+        <div id="notesList" style="margin-bottom: 20px; max-height: 250px; overflow-y: auto;"></div>
+        <hr style="border: none; border-top: 1px solid #ecf0f1; margin: 15px 0;">
+        <h4 style="margin-bottom: 10px;">添加笔记</h4>
+        <form id="addNoteForm">
+            <input type="hidden" name="investment_id">
+            <div class="form-group">
+                <label>内容</label>
+                <textarea name="content" rows="3" required placeholder="记录买卖决策理由..."></textarea>
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <button type="button" class="btn" onclick="closeModal('notesModal')" style="flex: 1; background: #ecf0f1;">关闭</button>
+                <button type="submit" class="btn btn-primary" style="flex: 1;">添加</button>
+            </div>
+        </form>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -155,8 +207,8 @@ function loadInvestments() {
             const totalProfit = data.reduce((sum, i) => sum + i.profit, 0);
             const profitRate = totalCost > 0 ? (totalProfit / totalCost * 100).toFixed(2) : 0;
             
-            document.getElementById('totalValue').textContent = totalValue|formatMoney;
-            document.getElementById('totalProfit').textContent = (totalProfit >= 0 ? '+' : '') + totalProfit|formatMoney;
+            document.getElementById('totalValue').textContent = formatMoney(totalValue);
+            document.getElementById('totalProfit').textContent = (totalProfit >= 0 ? '+' : '') + formatMoney(totalProfit);
             document.getElementById('totalProfit').style.color = totalProfit >= 0 ? '#27ae60' : '#e74c3c';
             document.getElementById('profitRate').textContent = (profitRate >= 0 ? '+' : '') + profitRate + '%';
             document.getElementById('profitRate').style.color = profitRate >= 0 ? '#27ae60' : '#e74c3c';
@@ -168,15 +220,17 @@ function loadInvestments() {
                     <td><strong>${i.name}</strong><br><small>${i.code || ''}</small></td>
                     <td>${i.type || '-'}</td>
                     <td>${i.quantity}</td>
-                    <td>${i.buy_price|formatMoney}</td>
-                    <td>${i.current_price|formatMoney}</td>
-                    <td>${i.total_value|formatMoney}</td>
+                    <td>${formatMoney(i.buy_price)}</td>
+                    <td>${formatMoney(i.current_price)}</td>
+                    <td>${formatMoney(i.total_value)}</td>
                     <td style="color: ${i.profit >= 0 ? '#27ae60' : '#e74c3c'}">
-                        ${i.profit >= 0 ? '+' : ''}${i.profit|formatMoney}<br>
+                        ${i.profit >= 0 ? '+' : ''}${formatMoney(i.profit)}<br>
                         <small>${i.profit_rate.toFixed(2)}%</small>
                     </td>
                     <td>
                         <button class="btn btn-sm btn-primary" onclick="openUpdatePrice(${i.id}, '${i.name}', ${i.current_price})">💰</button>
+                        <button class="btn btn-sm" onclick="openDividends(${i.id}, '${i.name}')" style="background: #27ae60; color: white;">💵</button>
+                        <button class="btn btn-sm" onclick="openNotes(${i.id}, '${i.name}')" style="background: #9b59b6; color: white;">📝</button>
                         <button class="btn btn-sm btn-danger" onclick="deleteInvestment(${i.id})">🗑️</button>
                     </td>
                 </tr>
@@ -282,5 +336,87 @@ document.getElementById('updatePriceForm').addEventListener('submit', function(e
 });
 
 loadInvestments();
+
+function openDividends(id, name) {
+    document.getElementById('dividendInvName').textContent = name;
+    document.querySelector('#addDividendForm [name="investment_id"]').value = id;
+    fetch(`/api/investments/${id}/dividends`)
+        .then(r => r.json())
+        .then(data => {
+            const list = document.getElementById('dividendsList');
+            if (data.length === 0) {
+                list.innerHTML = '<p style="color: #7f8c8d; text-align: center;">暂无分红记录</p>';
+            } else {
+                list.innerHTML = data.map(d => `
+                    <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #ecf0f1;">
+                        <div>
+                            <strong style="color: #27ae60;">+${formatMoney(d.amount)}</strong>
+                            <span style="color: #7f8c8d; margin-left: 10px;">${d.date}</span>
+                        </div>
+                        <span style="color: #7f8c8d; font-size: 12px;">${d.note || ''}</span>
+                    </div>
+                `).join('');
+            }
+            openModal('dividendModal');
+        });
+}
+
+document.getElementById('addDividendForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    const formData = new FormData(this);
+    const data = Object.fromEntries(formData);
+    const id = data.investment_id;
+    delete data.investment_id;
+    
+    fetch(`/api/investments/${id}/dividends`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    }).then(() => {
+        showToast('分红记录添加成功');
+        openDividends(id, document.getElementById('dividendInvName').textContent);
+        this.querySelector('[name="amount"]').value = '';
+        this.querySelector('[name="note"]').value = '';
+    });
+});
+
+function openNotes(id, name) {
+    document.getElementById('notesInvName').textContent = name;
+    document.querySelector('#addNoteForm [name="investment_id"]').value = id;
+    fetch(`/api/investments/${id}/notes`)
+        .then(r => r.json())
+        .then(data => {
+            const list = document.getElementById('notesList');
+            if (data.length === 0) {
+                list.innerHTML = '<p style="color: #7f8c8d; text-align: center;">暂无笔记</p>';
+            } else {
+                list.innerHTML = data.map(n => `
+                    <div style="padding: 10px 0; border-bottom: 1px solid #ecf0f1;">
+                        <div style="font-size: 12px; color: #7f8c8d; margin-bottom: 4px;">${n.created_at}</div>
+                        <div>${n.content}</div>
+                    </div>
+                `).join('');
+            }
+            openModal('notesModal');
+        });
+}
+
+document.getElementById('addNoteForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    const formData = new FormData(this);
+    const data = Object.fromEntries(formData);
+    const id = data.investment_id;
+    delete data.investment_id;
+    
+    fetch(`/api/investments/${id}/notes`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    }).then(() => {
+        showToast('笔记添加成功');
+        openNotes(id, document.getElementById('notesInvName').textContent);
+        this.querySelector('[name="content"]').value = '';
+    });
+});
 </script>
 {% endblock %}

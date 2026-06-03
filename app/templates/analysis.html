@@ -5,7 +5,7 @@
 {% block content %}
 <div class="header">
     <h1>📊 账单分析</h1>
-    <input type="month" id="monthSelect" value="{{ today }}" onchange="loadAnalysis()" style="padding: 10px; border-radius: 8px; border: 2px solid #ecf0f1;">
+    <input type="month" id="monthSelect" value="{{ current_month }}" onchange="loadAnalysis()" style="padding: 10px; border-radius: 8px; border: 2px solid #ecf0f1;">
 </div>
 
 <div class="cards">
@@ -48,6 +48,20 @@
         <div id="hotSpots"></div>
     </div>
 </div>
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 20px;">
+    <div class="chart-container">
+        <h3 style="margin-bottom: 20px;">⚠️ 消费异常检测</h3>
+        <div id="anomalyList">
+            <p style="color: #7f8c8d; text-align: center;">加载中...</p>
+        </div>
+    </div>
+    <div class="chart-container">
+        <h3 style="margin-bottom: 20px;">📈 消费趋势预测</h3>
+        <canvas id="predictionChart"></canvas>
+        <div id="predictionInfo" style="margin-top: 15px; text-align: center;"></div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -56,6 +70,7 @@ let currentMonth = new Date().toISOString().slice(0, 7);
 let categoryChart = null;
 let dailyChart = null;
 let weekdayChart = null;
+let predictionChart = null;
 
 function loadAnalysis() {
     currentMonth = document.getElementById('monthSelect').value;
@@ -63,9 +78,9 @@ function loadAnalysis() {
     fetch(`/api/analysis/monthly-summary?month=${currentMonth}`)
         .then(r => r.json())
         .then(data => {
-            document.getElementById('totalIncome').textContent = data.income|formatMoney;
-            document.getElementById('totalExpense').textContent = data.expense|formatMoney;
-            document.getElementById('netIncome').textContent = data.net|formatMoney;
+            document.getElementById('totalIncome').textContent = formatMoney(data.income);
+            document.getElementById('totalExpense').textContent = formatMoney(data.expense);
+            document.getElementById('netIncome').textContent = formatMoney(data.net);
             document.getElementById('netIncome').style.color = data.net >= 0 ? '#27ae60' : '#e74c3c';
             
             const savingsRate = data.income > 0 ? (data.net / data.income * 100).toFixed(1) : 0;
@@ -93,7 +108,7 @@ function loadAnalysis() {
             hotSpots.innerHTML = sorted.slice(0, 5).map((c, i) => `
                 <div style="display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #ecf0f1;">
                     <span><strong>${i + 1}.</strong> ${c.name}</span>
-                    <span style="font-weight: bold; color: #e74c3c;">${c.amount|formatMoney}</span>
+                    <span style="font-weight: bold; color: #e74c3c;">${formatMoney(c.amount)}</span>
                 </div>
             `).join('');
         });
@@ -143,6 +158,76 @@ function loadAnalysis() {
                     plugins: { legend: { display: false } }
                 }
             });
+        });
+    
+    fetch(`/api/analysis/anomaly-detection?month=${currentMonth}`)
+        .then(r => r.json())
+        .then(data => {
+            const container = document.getElementById('anomalyList');
+            if (data.length === 0) {
+                container.innerHTML = '<p style="color: #27ae60; text-align: center; padding: 20px;">✅ 本月暂无消费异常</p>';
+            } else {
+                container.innerHTML = data.map(a => `
+                    <div style="padding: 12px; margin-bottom: 10px; background: #fff3cd; border-left: 4px solid #f39c12; border-radius: 4px;">
+                        <div style="font-weight: bold; color: #e74c3c; margin-bottom: 5px;">⚠️ ${a.category}</div>
+                        <div style="font-size: 13px; color: #666;">
+                            本月 ${formatMoney(a.current)} vs 上月 ${formatMoney(a.last)}<br>
+                            <strong style="color: #e74c3c;">增长 ${a.change_rate.toFixed(1)}%</strong>
+                        </div>
+                    </div>
+                `).join('');
+            }
+        });
+    
+    fetch('/api/analysis/trend-prediction')
+        .then(r => r.json())
+        .then(data => {
+            const ctx4 = document.getElementById('predictionChart').getContext('2d');
+            if (predictionChart) predictionChart.destroy();
+            
+            if (data.months.length < 2) {
+                document.getElementById('predictionInfo').innerHTML = '<p style="color: #7f8c8d;">数据不足，需要至少2个月数据</p>';
+                return;
+            }
+            
+            const nextMonth = new Date(data.months[data.months.length - 1] + '-01');
+            nextMonth.setMonth(nextMonth.getMonth() + 1);
+            const nextMonthStr = nextMonth.toISOString().slice(0, 7);
+            
+            predictionChart = new Chart(ctx4, {
+                type: 'line',
+                data: {
+                    labels: [...data.months, nextMonthStr],
+                    datasets: [
+                        {
+                            label: '实际支出',
+                            data: [...data.amounts, null],
+                            borderColor: '#667eea',
+                            backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                            fill: true,
+                            tension: 0.4
+                        },
+                        {
+                            label: '预测',
+                            data: [...Array(data.months.length - 1).fill(null), data.amounts[data.amounts.length - 1], data.predicted],
+                            borderColor: '#e74c3c',
+                            borderDash: [5, 5],
+                            backgroundColor: 'rgba(231, 76, 60, 0.1)',
+                            fill: false,
+                            tension: 0.4
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { position: 'bottom' } }
+                }
+            });
+            
+            document.getElementById('predictionInfo').innerHTML = `
+                <p style="color: #2c3e50;">预测下月支出: <strong style="color: #e74c3c;">${formatMoney(data.predicted)}</strong></p>
+                <p style="font-size: 12px; color: #7f8c8d;">基于近${data.months.length}个月数据线性预测</p>
+            `;
         });
 }
 

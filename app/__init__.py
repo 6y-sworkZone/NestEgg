@@ -22,7 +22,9 @@ def create_app():
     
     @app.context_processor
     def inject_today():
-        return {'today': date.today().strftime('%Y-%m-%d')}
+        from datetime import date as date_cls
+        d = date_cls.today()
+        return {'today': d.strftime('%Y-%m-%d'), 'current_month': d.strftime('%Y-%m')}
     
     with app.app_context():
         db.create_all()

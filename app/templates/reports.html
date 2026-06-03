@@ -25,7 +25,7 @@
     <div style="display: flex; gap: 20px; align-items: center; flex-wrap: wrap;">
         <div class="form-group" style="margin-bottom: 0; min-width: 150px;">
             <label>选择月份</label>
-            <input type="month" id="reportMonth" value="{{ today }}">
+            <input type="month" id="reportMonth" value="{{ current_month }}">
         </div>
         <button class="btn btn-primary" onclick="exportExcel()">📊 导出 Excel</button>
         <button class="btn btn-success" onclick="exportPDF()">📄 导出 PDF</button>
@@ -142,7 +142,7 @@ function loadRecurring() {
                 <tr>
                     <td>${r.name}</td>
                     <td><span style="color: ${r.type === 'income' ? '#27ae60' : '#e74c3c'}">${r.type === 'income' ? '收入' : '支出'}</span></td>
-                    <td style="font-weight: bold;">${r.amount|formatMoney}</td>
+                    <td style="font-weight: bold;">${formatMoney(r.amount)}</td>
                     <td>${r.frequency === 'monthly' ? '每月' : '每周'}</td>
                     <td>${r.next_run_date}</td>
                     <td><button class="btn btn-sm btn-danger" onclick="deleteRecurring(${r.id})">🗑️</button></td>
@@ -171,7 +171,8 @@ function exportExcel() {
 }
 
 function exportPDF() {
-    showToast('PDF导出功能开发中', 'error');
+    const month = document.getElementById('reportMonth').value;
+    window.location.href = `/api/reports/export/pdf?month=${month}`;
 }
 
 document.getElementById('recurringForm').addEventListener('submit', function(e) {

@@ -186,6 +186,55 @@
         </div>
     </div>
 </div>
+
+<div class="modal" id="editAccountModal">
+    <div class="modal-content">
+        <h2>✏️ 编辑账户</h2>
+        <form id="editAccountForm">
+            <input type="hidden" name="id">
+            <div class="form-group">
+                <label>账户名称</label>
+                <input type="text" name="name" required>
+            </div>
+            <div class="row">
+                <div class="form-group">
+                    <label>账户类型</label>
+                    <select name="type" required>
+                        <option value="现金">💵 现金</option>
+                        <option value="储蓄卡">🏦 储蓄卡</option>
+                        <option value="信用卡">💳 信用卡</option>
+                        <option value="支付宝">📱 支付宝</option>
+                        <option value="微信">💬 微信</option>
+                        <option value="投资账户">📈 投资账户</option>
+                        <option value="其他">📦 其他</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>颜色标记</label>
+                    <input type="color" name="color" style="height: 48px;">
+                </div>
+            </div>
+            <div class="row">
+                <div class="form-group">
+                    <label>信用额度（信用卡）</label>
+                    <input type="number" step="0.01" name="credit_limit" value="0">
+                </div>
+                <div class="form-group">
+                    <label>账单日</label>
+                    <input type="number" min="1" max="31" name="bill_day" placeholder="1-31">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>还款日</label>
+                <input type="number" min="1" max="31" name="payment_day" placeholder="1-31">
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <button type="button" class="btn" onclick="closeModal('editAccountModal')" style="flex: 1; background: #ecf0f1;">取消</button>
+                <button type="submit" class="btn btn-primary" style="flex: 1;">保存</button>
+            </div>
+        </form>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -229,7 +278,7 @@ function reconcileAccount(id) {
     const accounts = {{ accounts|tojson }};
     const account = accounts.find(a => a.id === id);
     document.querySelector('[name="account_id"]').value = id;
-    document.getElementById('systemBalance').value = account.balance|formatMoney;
+    document.getElementById('systemBalance').value = formatMoney(account.balance);
     openModal('reconcileModal');
 }
 
@@ -280,7 +329,37 @@ function viewHistory(id) {
 }
 
 function editAccount(id) {
-    showToast('编辑功能开发中', 'error');
+    fetch(`/api/accounts/${id}`)
+        .then(r => r.json())
+        .then(data => {
+            const form = document.getElementById('editAccountForm');
+            form.querySelector('[name="id"]').value = data.id;
+            form.querySelector('[name="name"]').value = data.name;
+            form.querySelector('[name="type"]').value = data.type;
+            form.querySelector('[name="color"]').value = data.color;
+            form.querySelector('[name="credit_limit"]').value = data.credit_limit || 0;
+            form.querySelector('[name="bill_day"]').value = data.bill_day || '';
+            form.querySelector('[name="payment_day"]').value = data.payment_day || '';
+            openModal('editAccountModal');
+        });
 }
+
+document.getElementById('editAccountForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    const formData = new FormData(this);
+    const data = Object.fromEntries(formData);
+    const id = data.id;
+    delete data.id;
+    
+    fetch(`/api/accounts/${id}`, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    }).then(() => {
+        showToast('账户更新成功');
+        closeModal('editAccountModal');
+        location.reload();
+    });
+});
 </script>
 {% endblock %}

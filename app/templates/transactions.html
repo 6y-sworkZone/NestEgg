@@ -233,7 +233,7 @@ function loadTransactions(page = 1) {
                     <td><span style="color: ${t.type === 'income' ? '#27ae60' : '#e74c3c'}">${t.type === 'income' ? '收入' : '支出'}</span></td>
                     <td>${t.category || '-'}</td>
                     <td>${t.account}</td>
-                    <td style="font-weight: bold; color: ${t.type === 'income' ? '#27ae60' : '#e74c3c'}">${t.type === 'income' ? '+' : '-'}${t.amount|formatMoney}</td>
+                    <td style="font-weight: bold; color: ${t.type === 'income' ? '#27ae60' : '#e74c3c'}">${t.type === 'income' ? '+' : '-'}${formatMoney(t.amount)}</td>
                     <td>${t.note || '-'} ${t.tags ? t.tags.split(',').map(tag => `<span class="tag">${tag}</span>`).join('') : ''}</td>
                     <td>
                         <button class="btn btn-sm" onclick="editTransaction(${JSON.stringify(t).replace(/"/g, '&quot;')})" style="background: #f39c12; color: white;">✏️</button>

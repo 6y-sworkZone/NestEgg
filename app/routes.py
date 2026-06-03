@@ -90,6 +90,22 @@ def update_account(id):
     db.session.commit()
     return jsonify({'success': True})
 
+@main_bp.route('/api/accounts/<int:id>', methods=['GET'])
+def get_account(id):
+    account = Account.query.get_or_404(id)
+    return jsonify({
+        'id': account.id,
+        'name': account.name,
+        'type': account.type,
+        'balance': account.balance,
+        'initial_balance': account.initial_balance,
+        'color': account.color,
+        'bill_day': account.bill_day,
+        'payment_day': account.payment_day,
+        'credit_limit': account.credit_limit,
+        'is_archived': account.is_archived
+    })
+
 @main_bp.route('/api/accounts/<int:id>/archive', methods=['POST'])
 def archive_account(id):
     account = Account.query.get_or_404(id)
@@ -515,6 +531,51 @@ def delete_investment(id):
     db.session.commit()
     return jsonify({'success': True})
 
+@main_bp.route('/api/investments/<int:id>/dividends')
+def list_dividends(id):
+    dividends = Dividend.query.filter_by(investment_id=id).order_by(Dividend.date.desc()).all()
+    return jsonify([{
+        'id': d.id,
+        'amount': d.amount,
+        'date': d.date.strftime('%Y-%m-%d'),
+        'note': d.note
+    } for d in dividends])
+
+@main_bp.route('/api/investments/<int:id>/dividends', methods=['POST'])
+def add_dividend(id):
+    Investment.query.get_or_404(id)
+    data = request.json
+    div = Dividend(
+        investment_id=id,
+        amount=float(data['amount']),
+        date=datetime.strptime(data['date'], '%Y-%m-%d').date(),
+        note=data.get('note', '')
+    )
+    db.session.add(div)
+    db.session.commit()
+    return jsonify({'success': True})
+
+@main_bp.route('/api/investments/<int:id>/notes')
+def list_investment_notes(id):
+    notes = InvestmentNote.query.filter_by(investment_id=id).order_by(InvestmentNote.created_at.desc()).all()
+    return jsonify([{
+        'id': n.id,
+        'content': n.content,
+        'created_at': n.created_at.strftime('%Y-%m-%d %H:%M')
+    } for n in notes])
+
+@main_bp.route('/api/investments/<int:id>/notes', methods=['POST'])
+def add_investment_note(id):
+    Investment.query.get_or_404(id)
+    data = request.json
+    note = InvestmentNote(
+        investment_id=id,
+        content=data['content']
+    )
+    db.session.add(note)
+    db.session.commit()
+    return jsonify({'success': True})
+
 @main_bp.route('/savings')
 def savings():
     return render_template('savings.html')
@@ -673,6 +734,81 @@ def weekday_vs_weekend():
         'weekend': weekend_expense
     })
 
+@main_bp.route('/api/analysis/anomaly-detection')
+def anomaly_detection():
+    today = date.today()
+    month = request.args.get('month', today.strftime('%Y-%m'))
+    
+    first_day = today.replace(day=1)
+    last_month = (first_day - timedelta(days=1)).strftime('%Y-%m')
+    
+    current_cats = db.session.query(
+        Category.name,
+        func.sum(Transaction.amount).label('total')
+    ).join(Transaction).filter(
+        Transaction.type == 'expense',
+        func.strftime('%Y-%m', Transaction.date) == month
+    ).group_by(Category.id).all()
+    
+    last_cats = db.session.query(
+        Category.name,
+        func.sum(Transaction.amount).label('total')
+    ).join(Transaction).filter(
+        Transaction.type == 'expense',
+        func.strftime('%Y-%m', Transaction.date) == last_month
+    ).group_by(Category.id).all()
+    
+    last_dict = {name: total for name, total in last_cats}
+    
+    anomalies = []
+    for name, total in current_cats:
+        if name in last_dict and last_dict[name] > 0:
+            change_rate = (total - last_dict[name]) / last_dict[name] * 100
+            if change_rate >= 50:
+                anomalies.append({
+                    'category': name,
+                    'current': total,
+                    'last': last_dict[name],
+                    'change_rate': change_rate
+                })
+    
+    return jsonify(anomalies)
+
+@main_bp.route('/api/analysis/trend-prediction')
+def trend_prediction():
+    months_data = db.session.query(
+        func.strftime('%Y-%m', Transaction.date).label('month'),
+        func.sum(Transaction.amount).label('total')
+    ).filter(
+        Transaction.type == 'expense'
+    ).group_by(func.strftime('%Y-%m', Transaction.date)).order_by(
+        func.strftime('%Y-%m', Transaction.date)
+    ).limit(6).all()
+    
+    if len(months_data) < 2:
+        return jsonify({'predicted': 0, 'months': [], 'amounts': []})
+    
+    months = [m for m, _ in months_data]
+    amounts = [a for _, a in months_data]
+    
+    n = len(months)
+    x = list(range(n))
+    sum_x = sum(x)
+    sum_y = sum(amounts)
+    sum_xy = sum(x[i] * amounts[i] for i in range(n))
+    sum_x2 = sum(xi ** 2 for xi in x)
+    
+    slope = (n * sum_xy - sum_x * sum_y) / (n * sum_x2 - sum_x ** 2) if (n * sum_x2 - sum_x ** 2) != 0 else 0
+    intercept = (sum_y - slope * sum_x) / n
+    
+    predicted = max(0, slope * n + intercept)
+    
+    return jsonify({
+        'predicted': round(predicted, 2),
+        'months': months,
+        'amounts': amounts
+    })
+
 @main_bp.route('/reports')
 def reports():
     accounts = Account.query.filter_by(is_archived=False).all()
@@ -711,6 +847,80 @@ def export_excel():
     response = make_response(output.getvalue())
     response.headers["Content-Disposition"] = f"attachment; filename=report_{month}.xlsx"
     response.headers["Content-type"] = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    return response
+
+@main_bp.route('/api/reports/export/pdf')
+def export_pdf():
+    month = request.args.get('month', date.today().strftime('%Y-%m'))
+    
+    transactions = Transaction.query.filter(
+        func.strftime('%Y-%m', Transaction.date) == month
+    ).order_by(Transaction.date).all()
+    
+    income = db.session.query(func.sum(Transaction.amount)).filter(
+        Transaction.type == 'income',
+        func.strftime('%Y-%m', Transaction.date) == month
+    ).scalar() or 0
+    
+    expense = db.session.query(func.sum(Transaction.amount)).filter(
+        Transaction.type == 'expense',
+        func.strftime('%Y-%m', Transaction.date) == month
+    ).scalar() or 0
+    
+    output = io.BytesIO()
+    doc = SimpleDocTemplate(output, pagesize=A4)
+    styles = getSampleStyleSheet()
+    elements = []
+    
+    elements.append(Paragraph(f'{month} 月度财务报表', styles['Title']))
+    elements.append(Spacer(1, 20))
+    
+    summary_data = [
+        ['项目', '金额'],
+        ['总收入', f'¥{income:,.2f}'],
+        ['总支出', f'¥{expense:,.2f}'],
+        ['净收入', f'¥{income - expense:,.2f}']
+    ]
+    summary_table = Table(summary_data)
+    summary_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+    ]))
+    elements.append(summary_table)
+    elements.append(Spacer(1, 20))
+    
+    elements.append(Paragraph('收支明细', styles['Heading2']))
+    
+    trans_data = [['日期', '类型', '分类', '账户', '金额', '备注']]
+    for t in transactions:
+        trans_data.append([
+            t.date.strftime('%Y-%m-%d'),
+            '收入' if t.type == 'income' else '支出',
+            t.category.name if t.category else '',
+            t.account.name,
+            f'¥{t.amount:,.2f}',
+            t.note or ''
+        ])
+    
+    trans_table = Table(trans_data)
+    trans_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('ALIGN', (4, 0), (4, -1), 'RIGHT'),
+    ]))
+    elements.append(trans_table)
+    
+    doc.build(elements)
+    output.seek(0)
+    
+    response = make_response(output.getvalue())
+    response.headers["Content-Disposition"] = f"attachment; filename=report_{month}.pdf"
+    response.headers["Content-type"] = "application/pdf"
     return response
 
 @main_bp.route('/api/health-score')
